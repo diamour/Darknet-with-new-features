@@ -10,7 +10,7 @@ route_layer make_route_layer(int batch, int n, int *input_layers, int *input_siz
     route_layer l = {0};
     l.type = ROUTE;
     l.batch = batch;
-    l.n = n;
+    l.n = n;//有多少层参与拼接
     l.input_layers = input_layers;
     l.input_sizes = input_sizes;
     int i;

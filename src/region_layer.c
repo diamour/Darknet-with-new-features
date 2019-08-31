@@ -388,6 +388,13 @@ void get_region_detections(layer l, int w, int h, int netw, int neth, float thre
             l.output[i] = (l.output[i] + flip[i])/2.;
         }
     }
+    printf("l.batch %d\n",l.batch);
+    printf("l.coords %d\n",l.coords);
+    printf("l.w %d\n",l.w);
+    printf("l.h %d\n",l.h);
+    printf("l.n %d\n",l.n);
+    printf("l.background %d\n",l.background);
+    printf("l.softmax_tree %d\n",l.softmax_tree);
     for (i = 0; i < l.w*l.h; ++i){
         int row = i / l.w;
         int col = i % l.w;

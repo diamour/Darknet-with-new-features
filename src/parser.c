@@ -5,6 +5,7 @@
 
 #include "activation_layer.h"
 #include "logistic_layer.h"
+#include "se_layer.h"
 #include "l2norm_layer.h"
 #include "activations.h"
 #include "avgpool_layer.h"
@@ -13,6 +14,8 @@
 #include "connected_layer.h"
 #include "deconvolutional_layer.h"
 #include "convolutional_layer.h"
+#include "mix_convolutional_layer.h"
+#include "depthwise_convolutional_layer.h"
 #include "cost_layer.h"
 #include "crnn_layer.h"
 #include "crop_layer.h"
@@ -48,6 +51,7 @@ LAYER_TYPE string_to_layer_type(char * type)
 {
 
     if (strcmp(type, "[shortcut]")==0) return SHORTCUT;
+    if (strcmp(type, "[se]")==0) return SE;
     if (strcmp(type, "[crop]")==0) return CROP;
     if (strcmp(type, "[cost]")==0) return COST;
     if (strcmp(type, "[detection]")==0) return DETECTION;
@@ -57,6 +61,10 @@ LAYER_TYPE string_to_layer_type(char * type)
     if (strcmp(type, "[local]")==0) return LOCAL;
     if (strcmp(type, "[conv]")==0
             || strcmp(type, "[convolutional]")==0) return CONVOLUTIONAL;
+    if (strcmp(type, "[mix_conv]")==0
+            || strcmp(type, "[mix_convolutional]")==0) return MIX_CONVOLUTIONAL;
+    if (strcmp(type, "[depthwise_conv]")==0
+            || strcmp(type, "[depthwise_convolutional]")==0) return DEPTHWISE_CONVOLUTIONAL;
     if (strcmp(type, "[deconv]")==0
             || strcmp(type, "[deconvolutional]")==0) return DECONVOLUTIONAL;
     if (strcmp(type, "[activation]")==0) return ACTIVE;
@@ -180,10 +188,31 @@ convolutional_layer parse_convolutional(list *options, size_params params)
 {
     int n = option_find_int(options, "filters",1);
     int size = option_find_int(options, "size",1);
+    int ksize_h = option_find_int_quiet(options, "ksize_h",0);
+    int ksize_w = option_find_int_quiet(options, "ksize_w",0);
+    int stride_h = option_find_int_quiet(options, "stride_h",0);
+    int stride_w = option_find_int_quiet(options, "stride_w",0);
+    int rectFlg = option_find_int_quiet(options, "rectFlg",0);
     int stride = option_find_int(options, "stride",1);
     int pad = option_find_int_quiet(options, "pad",0);
     int padding = option_find_int_quiet(options, "padding",0);
     int groups = option_find_int_quiet(options, "groups", 1);
+    myParameters myParamStr;
+    myParamStr.prune = option_find_int_quiet(options, "prune", 0);
+    myParamStr.prune_threshold_min = option_find_float_quiet(options, "prune_threshold_min", 0);
+    myParamStr.prune_threshold_max = option_find_float_quiet(options, "prune_threshold_max", 0);
+    myParamStr.prune_step_num = option_find_float_quiet(options, "prune_add_step", 0);
+    myParamStr.prune_threshold_step=(myParamStr.prune_threshold_max-myParamStr.prune_threshold_min)/myParamStr.prune_step_num;
+    myParamStr.rectFlg=rectFlg;
+    myParamStr.ksize_h=ksize_h;
+    myParamStr.ksize_w=ksize_w;
+    
+    if(rectFlg){
+        size=(ksize_h>ksize_w)?ksize_h:ksize_w;
+        myParamStr.stride_h=(stride_h>0)?stride_h:stride;
+        myParamStr.stride_w=(stride_w>0)?stride_w:stride;
+    }
+
     if(pad) padding = size/2;
 
     char *activation_s = option_find_str(options, "activation", "logistic");
@@ -199,11 +228,129 @@ convolutional_layer parse_convolutional(list *options, size_params params)
     int binary = option_find_int_quiet(options, "binary", 0);
     int xnor = option_find_int_quiet(options, "xnor", 0);
 
-    convolutional_layer layer = make_convolutional_layer(batch,h,w,c,n,groups,size,stride,padding,activation, batch_normalize, binary, xnor, params.net->adam);
+    convolutional_layer layer = make_convolutional_layer(batch,h,w,c,n,groups,size,stride,padding,activation, batch_normalize, binary, xnor, params.net->adam,myParamStr);
+    
     layer.flipped = option_find_int_quiet(options, "flipped", 0);
     layer.dot = option_find_float_quiet(options, "dot", 0);
 
     return layer;
+}
+
+
+convolutional_layer parse_depthwise_convolutional(list *options, size_params params)
+{
+    // int n = option_find_int(options, "filters",1);
+    int size = option_find_int(options, "size",1);
+    int ksize_h = option_find_int_quiet(options, "ksize_h",0);
+    int ksize_w = option_find_int_quiet(options, "ksize_w",0);
+    int stride_h = option_find_int_quiet(options, "stride_h",0);
+    int stride_w = option_find_int_quiet(options, "stride_w",0);
+    int rectFlg = option_find_int_quiet(options, "rectFlg",0);
+    int stride = option_find_int(options, "stride",1);
+    int pad = option_find_int_quiet(options, "pad",0);
+    int padding = option_find_int_quiet(options, "padding",0);
+    // int groups = option_find_int_quiet(options, "groups", 1);
+    myParameters myParamStr;
+    myParamStr.prune = option_find_int_quiet(options, "prune", 0);
+    myParamStr.prune_threshold_min = option_find_float_quiet(options, "prune_threshold_min", 0);
+    myParamStr.prune_threshold_max = option_find_float_quiet(options, "prune_threshold_max", 0);
+    myParamStr.prune_step_num = option_find_float_quiet(options, "prune_add_step", 0);
+    myParamStr.prune_threshold_step=(myParamStr.prune_threshold_max-myParamStr.prune_threshold_min)/myParamStr.prune_step_num;
+    myParamStr.rectFlg=rectFlg;
+    myParamStr.ksize_h=ksize_h;
+    myParamStr.ksize_w=ksize_w;
+    
+    if(rectFlg){
+        size=(ksize_h>ksize_w)?ksize_h:ksize_w;
+        myParamStr.stride_h=(stride_h>0)?stride_h:stride;
+        myParamStr.stride_w=(stride_w>0)?stride_w:stride;
+    }
+
+    if(pad) padding = size/2;
+
+    char *activation_s = option_find_str(options, "activation", "logistic");
+    ACTIVATION activation = get_activation(activation_s);
+
+    int batch,h,w,c;
+    h = params.h;
+    w = params.w;
+    c = params.c;
+    batch=params.batch;
+    if(!(h && w && c)) error("Layer before convolutional layer must output image.");
+    int batch_normalize = option_find_int_quiet(options, "batch_normalize", 0);
+    // int binary = option_find_int_quiet(options, "binary", 0);
+    // int xnor = option_find_int_quiet(options, "xnor", 0);
+
+    depthwise_convolutional_layer layer = make_depthwise_convolutional_layer(batch,h,w,c,size,stride,padding,activation, batch_normalize, params.net->adam,myParamStr);
+    
+	return layer;
+}
+
+
+mix_convolutional_layer parse_mix_convolutional(list *options, size_params params)
+{
+    int n = option_find_int(options, "filters",1);
+    int *sizeList;
+    int mixNum = 1;
+    char *sizeListStr= option_find_str(options, "sizeList", 0);
+    if(sizeListStr){
+        int len = strlen(sizeListStr);
+        int i;
+        for(i = 0; i < len; ++i){
+            if (sizeListStr[i] == ',') ++mixNum ;
+        }
+        sizeList=calloc(mixNum, sizeof(int));
+        for(i = 0; i < mixNum ; ++i){
+            int _size = atoi(sizeListStr);
+            printf("load size:%d\n",_size);
+            sizeList[i] = _size;
+            sizeListStr = strchr(sizeListStr, ',')+1;
+        }
+    }
+
+    int ksize_h = option_find_int_quiet(options, "ksize_h",0);
+    int ksize_w = option_find_int_quiet(options, "ksize_w",0);
+    int stride_h = option_find_int_quiet(options, "stride_h",0);
+    int stride_w = option_find_int_quiet(options, "stride_w",0);
+    int rectFlg = option_find_int_quiet(options, "rectFlg",0);
+    int stride = option_find_int(options, "stride",1);
+    int pad = option_find_int_quiet(options, "pad",0);
+    int padding = option_find_int_quiet(options, "padding",0);
+    // int groups = option_find_int_quiet(options, "groups", 1);
+    myParameters myParamStr;
+    myParamStr.prune = option_find_int_quiet(options, "prune", 0);
+    myParamStr.prune_threshold_min = option_find_float_quiet(options, "prune_threshold_min", 0);
+    myParamStr.prune_threshold_max = option_find_float_quiet(options, "prune_threshold_max", 0);
+    myParamStr.prune_step_num = option_find_float_quiet(options, "prune_add_step", 0);
+    myParamStr.prune_threshold_step=(myParamStr.prune_threshold_max-myParamStr.prune_threshold_min)/myParamStr.prune_step_num;
+    myParamStr.rectFlg=rectFlg;
+    myParamStr.ksize_h=ksize_h;
+    myParamStr.ksize_w=ksize_w;
+    
+    // if(rectFlg){
+    //     size=(ksize_h>ksize_w)?ksize_h:ksize_w;
+    //     myParamStr.stride_h=(stride_h>0)?stride_h:stride;
+    //     myParamStr.stride_w=(stride_w>0)?stride_w:stride;
+    // }
+
+    if(pad) padding = sizeList[0]/2;
+
+    char *activation_s = option_find_str(options, "activation", "logistic");
+    ACTIVATION activation = get_activation(activation_s);
+
+    int batch,h,w,c;
+    h = params.h;
+    w = params.w;
+    c = params.c;
+    batch=params.batch;
+    if(!(h && w && c)) error("Layer before convolutional layer must output image.");
+    int batch_normalize = option_find_int_quiet(options, "batch_normalize", 0);
+    // int binary = option_find_int_quiet(options, "binary", 0);
+    // int xnor = option_find_int_quiet(options, "xnor", 0);
+
+    mix_convolutional_layer layer = make_mix_convolutional_layer(batch,h,w,c,n,mixNum,sizeList,stride,padding,activation, batch_normalize, params.net->adam,myParamStr);
+    
+	return layer;
 }
 
 layer parse_crnn(list *options, size_params params)
@@ -311,7 +458,9 @@ layer parse_yolo(list *options, size_params params)
 
     char *a = option_find_str(options, "mask", 0);
     int *mask = parse_yolo_mask(a, &num);
+    
     layer l = make_yolo_layer(params.batch, params.w, params.h, num, total, mask, classes);
+    printf("params.w:%d params.h:%d l.c:%d\n",params.w, params.h,l.c);
     assert(l.outputs == params.inputs);
 
     l.max_boxes = option_find_int_quiet(options, "max",90);
@@ -598,6 +747,19 @@ layer parse_upsample(list *options, size_params params, network *net)
     return l;
 }
 
+
+se_layer parse_se(list *options, size_params params)
+{
+// make_se_layer(int batch, int h, int w, int c, ACTIVATION activation, int batch_normalize,  int adam, myParameters myParamStr)
+    char *activation_s = option_find_str(options, "activation", "linear");
+    // char *activation_s = option_find_str(options, "activation", "logistic");
+    ACTIVATION activation = get_activation(activation_s);
+    int batch_normalize = option_find_int_quiet(options, "batch_normalize", 0);
+    myParameters myParamStr;
+    layer l = make_se_layer(params.batch, params.w, params.h, params.c, activation,batch_normalize,params.net->adam,myParamStr);
+    return l;
+}
+
 route_layer parse_route(list *options, size_params params, network *net)
 {
     char *l = option_find(options, "layers");
@@ -775,6 +937,12 @@ network *parse_network_cfg(char *filename)
         LAYER_TYPE lt = string_to_layer_type(s->type);
         if(lt == CONVOLUTIONAL){
             l = parse_convolutional(options, params);
+        }else if(lt == DEPTHWISE_CONVOLUTIONAL){
+            l = parse_depthwise_convolutional(options, params);
+        }else if(lt == SE){
+            l = parse_se(options, params);
+        }else if(lt == MIX_CONVOLUTIONAL){
+            l = parse_mix_convolutional(options, params);
         }else if(lt == DECONVOLUTIONAL){
             l = parse_deconvolutional(options, params);
         }else if(lt == LOCAL){
@@ -930,8 +1098,9 @@ void save_convolutional_weights_binary(layer l, FILE *fp)
         pull_convolutional_layer(l);
     }
 #endif
-    binarize_weights(l.weights, l.n, l.c*l.size*l.size, l.binary_weights);
-    int size = l.c*l.size*l.size;
+    // printf("save conv, ksize:%d\n",l.ksize);
+    binarize_weights(l.weights, l.n, l.c*l.ksize, l.binary_weights);
+    int size = l.c*l.ksize;
     int i, j, k;
     fwrite(l.biases, sizeof(float), l.n, fp);
     if (l.batch_normalize){
@@ -966,6 +1135,7 @@ void save_convolutional_weights(layer l, FILE *fp)
         pull_convolutional_layer(l);
     }
 #endif
+    // printf("load conv, ksize:%d\n",l.ksize);
     int num = l.nweights;
     fwrite(l.biases, sizeof(float), l.n, fp);
     if (l.batch_normalize){
@@ -974,6 +1144,42 @@ void save_convolutional_weights(layer l, FILE *fp)
         fwrite(l.rolling_variance, sizeof(float), l.n, fp);
     }
     fwrite(l.weights, sizeof(float), num, fp);
+}
+
+void save_mix_convolutional_weights(layer l, FILE *fp)
+{
+#ifdef GPU
+    if(gpu_index >= 0){
+        pull_mix_convolutional_layer(l);
+    }
+#endif
+    // printf("load conv, ksize:%d\n",l.ksize);
+    int num = l.nweights;
+    fwrite(l.biases, sizeof(float), l.n, fp);
+    if (l.batch_normalize){
+        fwrite(l.scales, sizeof(float), l.n, fp);
+        fwrite(l.rolling_mean, sizeof(float), l.n, fp);
+        fwrite(l.rolling_variance, sizeof(float), l.n, fp);
+    }
+    fwrite(l.weights, sizeof(float), num, fp);
+}
+
+
+void save_depthwise_convolutional_weights(layer l, FILE *fp)
+{
+#ifdef GPU
+	if (gpu_index >= 0) {
+		pull_depthwise_convolutional_layer(l);
+	}
+#endif
+	int num = l.n*l.ksize;
+	fwrite(l.biases, sizeof(float), l.n, fp);
+	if (l.batch_normalize) {
+		fwrite(l.scales, sizeof(float), l.n, fp);
+		fwrite(l.rolling_mean, sizeof(float), l.n, fp);
+		fwrite(l.rolling_variance, sizeof(float), l.n, fp);
+	}
+	fwrite(l.weights, sizeof(float), num, fp);
 }
 
 void save_batchnorm_weights(layer l, FILE *fp)
@@ -1004,6 +1210,20 @@ void save_connected_weights(layer l, FILE *fp)
     }
 }
 
+void save_se_weights(layer l, FILE *fp)
+{
+#ifdef GPU
+    if(gpu_index >= 0){
+        pull_se_layer(l);
+    }
+#endif
+    layer connect1=l.sub_layers[1];
+    save_connected_weights(connect1, fp);
+    layer connect2=l.sub_layers[2];
+    save_connected_weights(connect2, fp);
+    // layer connect1=l->sub_layers[1];
+}
+
 void save_weights_upto(network *net, char *filename, int cutoff)
 {
 #ifdef GPU
@@ -1029,6 +1249,12 @@ void save_weights_upto(network *net, char *filename, int cutoff)
         if (l.dontsave) continue;
         if(l.type == CONVOLUTIONAL || l.type == DECONVOLUTIONAL){
             save_convolutional_weights(l, fp);
+        } if(l.type == DEPTHWISE_CONVOLUTIONAL){
+            save_depthwise_convolutional_weights(l, fp);
+        } if(l.type == SE){
+            save_se_weights(l, fp);
+        } if(l.type == MIX_CONVOLUTIONAL){
+            save_mix_convolutional_weights(l, fp);
         } if(l.type == CONNECTED){
             save_connected_weights(l, fp);
         } if(l.type == BATCHNORM){
@@ -1070,7 +1296,7 @@ void save_weights_upto(network *net, char *filename, int cutoff)
             }
 #endif
             int locations = l.out_w*l.out_h;
-            int size = l.size*l.size*l.c*l.n*locations;
+            int size = l.ksize*l.c*l.n*locations;
             fwrite(l.biases, sizeof(float), l.outputs, fp);
             fwrite(l.weights, sizeof(float), size, fp);
         }
@@ -1139,7 +1365,7 @@ void load_convolutional_weights_binary(layer l, FILE *fp)
         fread(l.rolling_mean, sizeof(float), l.n, fp);
         fread(l.rolling_variance, sizeof(float), l.n, fp);
     }
-    int size = l.c*l.size*l.size;
+    int size = l.c*l.ksize;
     int i, j, k;
     for(i = 0; i < l.n; ++i){
         float mean = 0;
@@ -1168,7 +1394,7 @@ void load_convolutional_weights(layer l, FILE *fp)
         //return;
     }
     if(l.numload) l.n = l.numload;
-    int num = l.c/l.groups*l.n*l.size*l.size;
+    int num = l.c/l.groups*l.n*l.ksize;
     fread(l.biases, sizeof(float), l.n, fp);
     if (l.batch_normalize && (!l.dontloadscales)){
         fread(l.scales, sizeof(float), l.n, fp);
@@ -1202,15 +1428,101 @@ void load_convolutional_weights(layer l, FILE *fp)
         }
     }
     fread(l.weights, sizeof(float), num, fp);
+    // if(l.rectFlg){
+    //     int i;
+    //     printf("load conv, size:%d\n",num);
+    //     for(i=0;i<100;i++){
+    //         printf("%f ",l.weights[i]);
+    //     }
+    // }
     //if(l.c == 3) scal_cpu(num, 1./256, l.weights, 1);
     if (l.flipped) {
-        transpose_matrix(l.weights, l.c*l.size*l.size, l.n);
+        transpose_matrix(l.weights, l.c*l.ksize, l.n);
     }
-    //if (l.binary) binarize_weights(l.weights, l.n, l.c*l.size*l.size, l.weights);
+    //if (l.binary) binarize_weights(l.weights, l.n, l.c*l.ksize, l.weights);
 #ifdef GPU
     if(gpu_index >= 0){
         push_convolutional_layer(l);
     }
+#endif
+}
+void load_se_weights(layer l, FILE *fp, int transpose)
+{
+    layer connect1=l.sub_layers[1];
+    load_connected_weights(connect1, fp ,transpose);
+    layer connect2=l.sub_layers[2];
+    load_connected_weights(connect2, fp ,transpose);
+    // layer connect1=l->sub_layers[1];
+    #ifdef GPU
+        if(gpu_index >= 0){
+            push_se_layer(l);
+        }
+    #endif
+}
+void load_mix_convolutional_weights(layer l, FILE *fp)
+{
+	int num = l.nweights;
+	fread(l.biases, sizeof(float), l.n, fp);
+	if (l.batch_normalize && (!l.dontloadscales)) {
+		fread(l.scales, sizeof(float), l.n, fp);
+		fread(l.rolling_mean, sizeof(float), l.n, fp);
+		fread(l.rolling_variance, sizeof(float), l.n, fp);
+		if (0) {
+			int i;
+			for (i = 0; i < l.n; ++i) {
+				printf("%g, ", l.rolling_mean[i]);
+			}
+			printf("\n");
+			for (i = 0; i < l.n; ++i) {
+				printf("%g, ", l.rolling_variance[i]);
+			}
+			printf("\n");
+		}
+		if (0) {
+			fill_cpu(l.n, 0, l.rolling_mean, 1);
+			fill_cpu(l.n, 0, l.rolling_variance, 1);
+		}
+	}
+	fread(l.weights, sizeof(float), num, fp);
+ 
+#ifdef GPU
+	if (gpu_index >= 0) {
+		push_mix_convolutional_layer(l);
+	}
+#endif
+}
+
+
+void load_depthwise_convolutional_weights(layer l, FILE *fp)
+{
+	int num = l.n*l.ksize;
+	fread(l.biases, sizeof(float), l.n, fp);
+	if (l.batch_normalize && (!l.dontloadscales)) {
+		fread(l.scales, sizeof(float), l.n, fp);
+		fread(l.rolling_mean, sizeof(float), l.n, fp);
+		fread(l.rolling_variance, sizeof(float), l.n, fp);
+		if (0) {
+			int i;
+			for (i = 0; i < l.n; ++i) {
+				printf("%g, ", l.rolling_mean[i]);
+			}
+			printf("\n");
+			for (i = 0; i < l.n; ++i) {
+				printf("%g, ", l.rolling_variance[i]);
+			}
+			printf("\n");
+		}
+		if (0) {
+			fill_cpu(l.n, 0, l.rolling_mean, 1);
+			fill_cpu(l.n, 0, l.rolling_variance, 1);
+		}
+	}
+	fread(l.weights, sizeof(float), num, fp);
+ 
+#ifdef GPU
+	if (gpu_index >= 0) {
+		push_depthwise_convolutional_layer(l);
+	}
 #endif
 }
 
@@ -1248,6 +1560,12 @@ void load_weights_upto(network *net, char *filename, int start, int cutoff)
         if (l.dontload) continue;
         if(l.type == CONVOLUTIONAL || l.type == DECONVOLUTIONAL){
             load_convolutional_weights(l, fp);
+        }if(l.type == DEPTHWISE_CONVOLUTIONAL){
+            load_depthwise_convolutional_weights(l, fp);
+        }if(l.type == MIX_CONVOLUTIONAL){
+            load_mix_convolutional_weights(l, fp);
+        }if(l.type == SE){
+            load_se_weights(l, fp, transpose);
         }
         if(l.type == CONNECTED){
             load_connected_weights(l, fp, transpose);

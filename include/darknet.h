@@ -59,6 +59,9 @@ typedef enum{
 
 typedef enum {
     CONVOLUTIONAL,
+    DEPTHWISE_CONVOLUTIONAL,
+    MIX_CONVOLUTIONAL,
+    SE,
     DECONVOLUTIONAL,
     CONNECTED,
     MAXPOOL,
@@ -116,6 +119,8 @@ struct layer{
     LAYER_TYPE type;
     ACTIVATION activation;
     COST_TYPE cost_type;
+    layer *sub_layers;
+    int sub_layers_Num;
     void (*forward)   (struct layer, struct network);
     void (*backward)  (struct layer, struct network);
     void (*update)    (struct layer, update_args);
@@ -137,6 +142,7 @@ struct layer{
     int out_h, out_w, out_c;
     int n;
     int max_boxes;
+    int L2_Flg;
     int groups;
     int size;
     int side;
@@ -181,6 +187,29 @@ struct layer{
     float alpha;
     float beta;
     float kappa;
+//     typedef struct myParameters{
+//     int prune;
+//     float prune_step_num;
+//     float prune_threshold_step;
+//     float prune_threshold_min;
+//     float prune_threshold_max;
+// }myParameters;
+    // myself defined parameters
+    int prune;
+    double *prune_threshold;
+    double prune_threshold_step;
+    double prune_threshold_min;
+    double prune_threshold_max;
+    //not Rect Conv
+    int rectFlg;
+    int ksize_h;
+    int ksize_w;
+    int ksize;
+    int pad_h;
+    int pad_w;
+    int stride_w;
+    int stride_h;
+
 
     float coord_scale;
     float object_scale;
@@ -232,14 +261,25 @@ struct layer{
     float * biases;
     float * bias_updates;
 
+    //for rect conv
+    float * mid_biases;
+    float * mid_bias_updates;
+
     float * scales;
     float * scale_updates;
 
     float * weights;
     float * weight_updates;
+    
+    //for rect conv
+    float * mid_weights;
+    float * mid_weight_updates;
 
     float * delta;
     float * output;
+    //for rect conv
+    float * mid_delta;
+    float * mid_output;
     float * loss;
     float * squared;
     float * norms;
@@ -600,6 +640,21 @@ typedef struct list{
     node *front;
     node *back;
 } list;
+
+
+typedef struct myParameters{
+    int prune;
+    double prune_step_num;
+    double prune_threshold_step;
+    double prune_threshold_min;
+    double prune_threshold_max;
+    int rectFlg;
+    int ksize_h;
+    int ksize_w;
+    int stride_h;
+    int stride_w;
+    int showMakeLayerFlg;
+}myParameters;
 
 pthread_t load_data(load_args args);
 list *read_data_cfg(char *filename);

@@ -13,6 +13,30 @@ extern "C" {
 #include "cuda.h"
 }
 
+/**************************prune network weights*************************/
+__global__ void prune_kernel(int N, float *weights,float *update_weights, float threshold, int INCX)
+{
+    int i = (blockIdx.x + blockIdx.y*gridDim.x) * blockDim.x + threadIdx.x;
+    int pruneNum=0;
+    if(i < N) {
+        if (fabs(weights[i*INCX])<threshold){
+            // printf("prune %f to 0 \n",weights[i*INCX]);
+            pruneNum++;
+            weights[i*INCX]=0;
+            update_weights[i*INCX] = 0;
+        }
+    }
+    // printf("PruneNum:%d Prune percentage:%f\n",pruneNum,float(pruneNum)/float(N));
+}
+
+//prune_gpu(size,l.weights_gpu,l.weight_updates_gpu,0.001,1);
+void prune_gpu(int N, float * X, float * Y, float threhold,int INCY)
+{
+    prune_kernel<<<cuda_gridsize(N), BLOCK>>>(N, X,  Y,threhold, INCY);
+    check_error(cudaPeekAtLastError());
+}
+
+
 __global__ void binarize_kernel(float *x, int n, float *binary)
 {
     int i = (blockIdx.x + blockIdx.y*gridDim.x) * blockDim.x + threadIdx.x;
@@ -72,14 +96,15 @@ void binarize_weights_gpu(float *weights, int n, int size, float *binary)
 
 void forward_convolutional_layer_gpu(convolutional_layer l, network net)
 {
+    // printf("forward_convolutional_layer_gpu\n");
     fill_gpu(l.outputs*l.batch, 0, l.output_gpu, 1);
     if(l.binary){
-        binarize_weights_gpu(l.weights_gpu, l.n, l.c/l.groups*l.size*l.size, l.binary_weights_gpu);
+        binarize_weights_gpu(l.weights_gpu, l.n, l.c/l.groups*l.ksize, l.binary_weights_gpu);
         swap_binary(&l);
     }
 
     if(l.xnor){
-        binarize_weights_gpu(l.weights_gpu, l.n, l.c/l.groups*l.size*l.size, l.binary_weights_gpu);
+        binarize_weights_gpu(l.weights_gpu, l.n, l.c/l.groups*l.ksize, l.binary_weights_gpu);
         swap_binary(&l);
         binarize_gpu(net.input_gpu, l.c*l.h*l.w*l.batch, l.binary_input_gpu);
         net.input_gpu = l.binary_input_gpu;
@@ -104,7 +129,7 @@ void forward_convolutional_layer_gpu(convolutional_layer l, network net)
 #else
     int i, j;
     int m = l.n/l.groups;
-    int k = l.size*l.size*l.c/l.groups;
+    int k = l.ksize*l.c/l.groups;
     int n = l.out_w*l.out_h;
     for(i = 0; i < l.batch; ++i){
         for(j = 0; j < l.groups; ++j){
@@ -116,7 +141,12 @@ void forward_convolutional_layer_gpu(convolutional_layer l, network net)
             if (l.size == 1){
                 b = im;
             } else {
-                im2col_gpu(im, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+                if(l.rectFlg){
+                    // printf("**************************************GPU ONLY**********************************************\n");
+                    rect_im2col_gpu(im, l.c/l.groups, l.h, l.w, l.ksize_h,l.ksize_w, l.stride_h,l.stride_w, l.pad_h,l.pad_w, b);
+                }else{
+                    im2col_gpu(im, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+                }
             }
             gemm_gpu(0,0,m,n,k,1,a,k,b,n,1,c,n);
         }
@@ -230,7 +260,7 @@ void backward_convolutional_layer_gpu(convolutional_layer l, network net)
 
 #else
     int m = l.n/l.groups;
-    int n = l.size*l.size*l.c/l.groups;
+    int n = l.ksize*l.c/l.groups;
     int k = l.out_w*l.out_h;
 
     int i, j;
@@ -243,7 +273,12 @@ void backward_convolutional_layer_gpu(convolutional_layer l, network net)
             float *im  = net.input_gpu+(i*l.groups + j)*l.c/l.groups*l.h*l.w;
             float *imd = net.delta_gpu+(i*l.groups + j)*l.c/l.groups*l.h*l.w;
 
-            im2col_gpu(im, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+            if(l.rectFlg){
+                rect_im2col_gpu(im, l.c/l.groups, l.h, l.w, l.ksize_h,l.ksize_w,  l.stride_h,l.stride_w, l.pad_h,l.pad_w, b);
+            }else{
+                im2col_gpu(im, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+            }
+            // im2col_gpu(im, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
             gemm_gpu(0,1,m,n,k,1,a,k,b,k,1,c,n);
 
             if (net.delta_gpu) {
@@ -258,7 +293,12 @@ void backward_convolutional_layer_gpu(convolutional_layer l, network net)
                 gemm_gpu(1,0,n,k,m,1,a,n,b,k,0,c,k);
 
                 if (l.size != 1) {
-                    col2im_gpu(net.workspace, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, imd);
+                    if(l.rectFlg){
+                        rect_col2im_gpu(net.workspace, l.c/l.groups, l.h, l.w, l.ksize_h,l.ksize_w,  l.stride_h,l.stride_w, l.pad_h,l.pad_w, imd);
+                    }else{
+                        col2im_gpu(net.workspace, l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, imd);
+                    }
+                    
                 }
                 if(l.binary || l.xnor) {
                     swap_binary(&l);
@@ -302,7 +342,17 @@ void update_convolutional_layer_gpu(layer l, update_args a)
     float momentum = a.momentum;
     float decay = a.decay;
     int batch = a.batch;
-
+    //static double prune_threshold=l.prune_threshold_min;
+    if(l.prune){
+        int size = l.ksize*l.c*l.n;
+        prune_gpu(size,l.weights_gpu,l.weight_updates_gpu,l.prune_threshold[0],1);        
+        
+        l.prune_threshold[0]+=l.prune_threshold_step;
+        if(l.prune_threshold[0]>=l.prune_threshold_max){
+            l.prune_threshold[0]=l.prune_threshold_max;
+        }
+        // printf("prune!%f\n",l.prune_threshold[0]);
+    }
     if(a.adam){
         adam_update_gpu(l.weights_gpu, l.weight_updates_gpu, l.m_gpu, l.v_gpu, a.B1, a.B2, a.eps, decay, learning_rate, l.nweights, batch, a.t);
         adam_update_gpu(l.biases_gpu, l.bias_updates_gpu, l.bias_m_gpu, l.bias_v_gpu, a.B1, a.B2, a.eps, decay, learning_rate, l.n, batch, a.t);

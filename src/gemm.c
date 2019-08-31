@@ -78,14 +78,33 @@ void gemm_nn(int M, int N, int K, float ALPHA,
 {
     int i,j,k;
     #pragma omp parallel for
+    
+     int pruneNum=0;
+     for(i=0;i<lda;i++){
+         if(A[i]==0){
+             pruneNum++;
+         }       
+     }
+     printf("PruneNum:%d Prune percentage:%d%%\n",pruneNum,pruneNum*100/lda);
+    
+    //printf("M:%d N:%d K:%d lda:%d ldb:%d ldc:%d\n",M,N,K,lda,ldb,ldc);
     for(i = 0; i < M; ++i){
         for(k = 0; k < K; ++k){
-            register float A_PART = ALPHA*A[i*lda+k];
-            for(j = 0; j < N; ++j){
-                C[i*ldc+j] += A_PART*B[k*ldb+j];
+            register float A_PART;
+             //printf("%f ",fabs(A[i*lda+k]));
+             if(A[i*lda+k]==0){
+                 //A[i*lda+k]=0;
             }
+             else{
+                A_PART= ALPHA*A[i*lda+k];
+                for(j = 0; j < N; ++j){
+                    C[i*ldc+j] += A_PART*B[k*ldb+j];
+                    //printf("%f ",fabs(B[k*ldb+j]));
+                }
+             }
         }
     }
+   // printf("\n");
 }
 
 void gemm_nt(int M, int N, int K, float ALPHA, 
@@ -140,8 +159,15 @@ void gemm_tt(int M, int N, int K, float ALPHA,
         }
     }
 }
-
-
+/*
+    int m = l.batch;
+    int k = l.inputs;
+    int n = l.outputs;
+    float *a = net.input;
+    float *b = l.weights;
+    float *c = l.output;
+    gemm(0,1,m,n,k,1,a,k,b,k,1,c,n);
+*/
 void gemm_cpu(int TA, int TB, int M, int N, int K, float ALPHA, 
         float *A, int lda, 
         float *B, int ldb,

@@ -398,10 +398,14 @@ void visualize(char *cfgfile, char *weightfile)
 }
 
 int main(int argc, char **argv)
+//int main(void)
 {
     //test_resize("data/bad.jpg");
     //test_box();
     //test_convolutional_layer();
+    //printf("argc:%d\n",argc);
+    //int argc=7;
+   // char *argv[7]={{"./darknet"},{"detector"},{"test"},{"cfg/voc_nok.data"},{"cfg/yolov2-supertiny-voc-nok-prune.cfg"},{"backup/yolov2-supertiny-voc-nok-prune_60000.weights"},{"/mydisk/darknet_projects/darknet/data/NOK/resized/000074.jpg"}};
     if(argc < 2){
         fprintf(stderr, "usage: %s <function>\n", argv[0]);
         return 0;
@@ -416,9 +420,10 @@ int main(int argc, char **argv)
 #else
     if(gpu_index >= 0){
         cuda_set_device(gpu_index);
+        
     }
 #endif
-
+    printf("GPU index:%d\n",gpu_index);
     if (0 == strcmp(argv[1], "average")){
         average(argc, argv);
     } else if (0 == strcmp(argv[1], "yolo")){
@@ -428,6 +433,7 @@ int main(int argc, char **argv)
     } else if (0 == strcmp(argv[1], "lsd")){
         run_lsd(argc, argv);
     } else if (0 == strcmp(argv[1], "detector")){
+        printf("run detector\n");
         run_detector(argc, argv);
     } else if (0 == strcmp(argv[1], "detect")){
         float thresh = find_float_arg(argc, argv, "-thresh", .5);

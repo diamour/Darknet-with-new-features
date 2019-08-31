@@ -150,6 +150,13 @@ void cuda_free(float *x_gpu)
     check_error(status);
 }
 
+void cuda_move_array(float *x_gpu1, float *x_gpu2, size_t n)
+{
+    size_t size = sizeof(float)*n;
+    cudaError_t status = cudaMemcpy(x_gpu1, x_gpu2, size, cudaMemcpyDeviceToDevice);
+    check_error(status);
+}
+
 void cuda_push_array(float *x_gpu, float *x, size_t n)
 {
     size_t size = sizeof(float)*n;

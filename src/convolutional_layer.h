@@ -10,6 +10,9 @@
 typedef layer convolutional_layer;
 
 #ifdef GPU
+//__global__ void prune_kernel(int N, float *weights,float *update_weights, float threshold, int INCX);
+void prune_gpu(int N, float * X, float * Y, float threhold,int INCY);
+
 void forward_convolutional_layer_gpu(convolutional_layer layer, network net);
 void backward_convolutional_layer_gpu(convolutional_layer layer, network net);
 void update_convolutional_layer_gpu(convolutional_layer layer, update_args a);
@@ -22,10 +25,14 @@ void backward_bias_gpu(float *bias_updates, float *delta, int batch, int n, int 
 void adam_update_gpu(float *w, float *d, float *m, float *v, float B1, float B2, float eps, float decay, float rate, int n, int batch, int t);
 #ifdef CUDNN
 void cudnn_convolutional_setup(layer *l);
+
 #endif
 #endif
 
-convolutional_layer make_convolutional_layer(int batch, int h, int w, int c, int n, int groups, int size, int stride, int padding, ACTIVATION activation, int batch_normalize, int binary, int xnor, int adam);
+
+convolutional_layer make_convolutional_layer(int batch, int h, int w, int c, int n, int groups, int size, int stride, int padding, ACTIVATION activation, int batch_normalize, int binary, int xnor, int adam, myParameters myParamStr);
+// convolutional_layer make_rect_convolutional_layer(int batch, int h, int w, int c, int n, int groups, int size, int stride, int padding, ACTIVATION activation, int batch_normalize, int binary, int xnor, int adam, myParameters myParamStr);
+
 void resize_convolutional_layer(convolutional_layer *layer, int w, int h);
 void forward_convolutional_layer(const convolutional_layer layer, network net);
 void update_convolutional_layer(convolutional_layer layer, update_args a);

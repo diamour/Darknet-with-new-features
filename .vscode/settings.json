@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "typeindex": "c",
+        "depthwise_convolutional_layer.h": "c",
+        "convolutional_layer.h": "c",
+        "initializer_list": "c",
+        "mix_convolutional_layer.h": "c",
+        "crop_layer.h": "c",
+        "connected_layer.h": "c"
+    }
+}

@@ -6,13 +6,15 @@
 #include "data.h"
 #include "utils.h"
 #include "blas.h"
-
+#include "se_layer.h"
 #include "crop_layer.h"
 #include "connected_layer.h"
 #include "gru_layer.h"
 #include "rnn_layer.h"
 #include "crnn_layer.h"
 #include "local_layer.h"
+#include "mix_convolutional_layer.h"
+#include "depthwise_convolutional_layer.h"
 #include "convolutional_layer.h"
 #include "activation_layer.h"
 #include "detection_layer.h"
@@ -124,8 +126,12 @@ char *get_layer_string(LAYER_TYPE a)
     switch(a){
         case CONVOLUTIONAL:
             return "convolutional";
+        case DEPTHWISE_CONVOLUTIONAL:
+            return "depthwise_convolutional";
         case ACTIVE:
             return "activation";
+        case SE:
+            return "se";
         case LOCAL:
             return "local";
         case DECONVOLUTIONAL:
@@ -137,7 +143,7 @@ char *get_layer_string(LAYER_TYPE a)
         case GRU:
             return "gru";
         case LSTM:
-	    return "lstm";
+	        return "lstm";
         case CRNN:
             return "crnn";
         case MAXPOOL:
@@ -346,6 +352,9 @@ void set_batch_network(network *net, int b)
         if(net->layers[i].type == CONVOLUTIONAL){
             cudnn_convolutional_setup(net->layers + i);
         }
+        if(net->layers[i].type == DEPTHWISE_CONVOLUTIONAL){
+            cudnn_depthwise_convolutional_setup(net->layers + i);
+        }
         if(net->layers[i].type == DECONVOLUTIONAL){
             layer *l = net->layers + i;
             cudnnSetTensor4dDescriptor(l->dstTensorDesc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, l->out_c, l->out_h, l->out_w);
@@ -371,8 +380,19 @@ int resize_network(network *net, int w, int h)
     //fflush(stderr);
     for (i = 0; i < net->n; ++i){
         layer l = net->layers[i];
+        // printf("resize check: %d type:%d\n",i,l.type);
         if(l.type == CONVOLUTIONAL){
             resize_convolutional_layer(&l, w, h);
+        }else if(l.type == DEPTHWISE_CONVOLUTIONAL){
+            resize_depthwise_convolutional_layer(&l, w, h);
+        }else if(l.type == MIX_CONVOLUTIONAL){
+            // printf("resize check fail: %d\n",i);
+            resize_mix_convolutional_layer(&l, w, h);
+            // printf("resize check fail: %d\n",i);
+        }else if(l.type == SE){
+            // printf("resize check fail: %d\n",i);
+            resize_se_layer(&l, w, h);
+            // printf("resize check fail: %d\n",i);
         }else if(l.type == CROP){
             resize_crop_layer(&l, w, h);
         }else if(l.type == MAXPOOL){
@@ -399,13 +419,17 @@ int resize_network(network *net, int w, int h)
             error("Cannot resize this type of layer");
         }
         if(l.workspace_size > workspace_size) workspace_size = l.workspace_size;
+        // printf("resize check l.workspace_size: %d\n",l.workspace_size);
         if(l.workspace_size > 2000000000) assert(0);
+        // printf("resize check fail 3: %d\n",i);
         inputs = l.outputs;
         net->layers[i] = l;
         w = l.out_w;
         h = l.out_h;
         if(l.type == AVGPOOL) break;
+        // printf("resize check fail 4: %d\n",i);
     }
+    // printf("resize check1\n");
     layer out = get_network_output_layer(net);
     net->inputs = net->layers[0].inputs;
     net->outputs = out.outputs;
@@ -514,12 +538,16 @@ int num_detections(network *net, float thresh)
     for(i = 0; i < net->n; ++i){
         layer l = net->layers[i];
         if(l.type == YOLO){
+            //printf("This is YOLO\n");
             s += yolo_num_detections(l, thresh);
         }
         if(l.type == DETECTION || l.type == REGION){
+            //printf("This is detection\n");
             s += l.w*l.h*l.n;
+            //printf("l.w:%d l.h:%d l.n:%d\n",l.w,l.h,l.n);
         }
     }
+    //printf("net.n %d s:%d\n",net->n,s);
     return s;
 }
 
@@ -542,17 +570,21 @@ detection *make_network_boxes(network *net, float thresh, int *num)
 void fill_network_boxes(network *net, int w, int h, float thresh, float hier, int *map, int relative, detection *dets)
 {
     int j;
+    
     for(j = 0; j < net->n; ++j){
         layer l = net->layers[j];
         if(l.type == YOLO){
+            //printf("DETECTION\n");
             int count = get_yolo_detections(l, w, h, net->w, net->h, thresh, map, relative, dets);
             dets += count;
         }
         if(l.type == REGION){
+           // printf("Region\n");
             get_region_detections(l, w, h, net->w, net->h, thresh, map, hier, relative, dets);
             dets += l.w*l.h*l.n;
         }
         if(l.type == DETECTION){
+           // printf("DETECTION\n");
             get_detection_detections(l, w, h, thresh, dets);
             dets += l.w*l.h*l.n;
         }
@@ -772,19 +804,24 @@ void forward_network_gpu(network *netp)
     for(i = 0; i < net.n; ++i){
         net.index = i;
         layer l = net.layers[i];
+        // printf("forward network 3:%i :%d\n",i,net.n);
         if(l.delta_gpu){
             fill_gpu(l.outputs * l.batch, 0, l.delta_gpu, 1);
         }
+        // printf("forward network 5:%i :%d\n",i,net.n);
         l.forward_gpu(l, net);
+        // printf("forward network:%i :%d\n",i,net.n);
         net.input_gpu = l.output_gpu;
         net.input = l.output;
         if(l.truth) {
             net.truth_gpu = l.output_gpu;
             net.truth = l.output;
         }
+        // printf("forward network 2:%i :%d\n",i,net.n);
     }
     pull_network_output(netp);
     calc_network_cost(netp);
+    // printf("forward network\n");
 }
 
 void backward_network_gpu(network *netp)
@@ -799,6 +836,7 @@ void backward_network_gpu(network *netp)
         if(i == 0){
             net = orig;
         }else{
+            // printf("back network:%i :%d\n",i,net.n);
             layer prev = net.layers[i-1];
             net.input = prev.output;
             net.delta = prev.delta;

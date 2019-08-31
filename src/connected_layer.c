@@ -17,7 +17,7 @@ layer make_connected_layer(int batch, int inputs, int outputs, ACTIVATION activa
     layer l = {0};
     l.learning_rate_scale = 1;
     l.type = CONNECTED;
-
+    l.L2_Flg=1;
     l.inputs = inputs;
     l.outputs = outputs;
     l.batch=batch;
@@ -142,8 +142,9 @@ void update_connected_layer(layer l, update_args a)
         axpy_cpu(l.outputs, learning_rate/batch, l.scale_updates, 1, l.scales, 1);
         scal_cpu(l.outputs, momentum, l.scale_updates, 1);
     }
-
-    axpy_cpu(l.inputs*l.outputs, -decay*batch, l.weights, 1, l.weight_updates, 1);
+    if(l.L2_Flg){
+        axpy_cpu(l.inputs*l.outputs, -decay*batch, l.weights, 1, l.weight_updates, 1);
+    }
     axpy_cpu(l.inputs*l.outputs, learning_rate/batch, l.weight_updates, 1, l.weights, 1);
     scal_cpu(l.inputs*l.outputs, momentum, l.weight_updates, 1);
 }
@@ -168,6 +169,7 @@ void forward_connected_layer(layer l, network net)
 
 void backward_connected_layer(layer l, network net)
 {
+    //计算激活层的梯度值
     gradient_array(l.output, l.outputs*l.batch, l.activation, l.delta);
 
     if(l.batch_normalize){
@@ -278,8 +280,10 @@ void update_connected_layer_gpu(layer l, update_args a)
             axpy_gpu(l.outputs, learning_rate/batch, l.scale_updates_gpu, 1, l.scales_gpu, 1);
             scal_gpu(l.outputs, momentum, l.scale_updates_gpu, 1);
         }
-
-        axpy_gpu(l.inputs*l.outputs, -decay*batch, l.weights_gpu, 1, l.weight_updates_gpu, 1);
+        if(l.L2_Flg){
+            axpy_gpu(l.inputs*l.outputs, -decay*batch, l.weights_gpu, 1, l.weight_updates_gpu, 1);
+        }
+        
         axpy_gpu(l.inputs*l.outputs, learning_rate/batch, l.weight_updates_gpu, 1, l.weights_gpu, 1);
         scal_gpu(l.inputs*l.outputs, momentum, l.weight_updates_gpu, 1);
     }

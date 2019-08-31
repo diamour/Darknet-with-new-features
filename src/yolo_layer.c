@@ -131,6 +131,7 @@ static int entry_index(layer l, int batch, int location, int entry)
 
 void forward_yolo_layer(const layer l, network net)
 {
+    // printf("forward_yolo_layer\n");
     int i,j,b,t,n;
     memcpy(l.output, net.input, l.outputs*l.batch*sizeof(float));
 
@@ -346,24 +347,33 @@ int get_yolo_detections(layer l, int w, int h, int netw, int neth, float thresh,
 
 void forward_yolo_layer_gpu(const layer l, network net)
 {
+    // printf("forward_yolo_layer_gpu\n");
     copy_gpu(l.batch*l.inputs, net.input_gpu, 1, l.output_gpu, 1);
     int b, n;
     for (b = 0; b < l.batch; ++b){
         for(n = 0; n < l.n; ++n){
+            // printf("forward_yolo_layer_gpu check point n:%d batch:%d\n",n,b);
             int index = entry_index(l, b, n*l.w*l.h, 0);
             activate_array_gpu(l.output_gpu + index, 2*l.w*l.h, LOGISTIC);
             index = entry_index(l, b, n*l.w*l.h, 4);
             activate_array_gpu(l.output_gpu + index, (1+l.classes)*l.w*l.h, LOGISTIC);
         }
     }
+    // printf("forward_yolo_layer_gpu check point 3\n");
     if(!net.train || l.onlyforward){
         cuda_pull_array(l.output_gpu, l.output, l.batch*l.outputs);
         return;
     }
-
+    // printf("forward_yolo_layer_gpu check point 4\n");
+    // printf("l.batch*l.inputs:%d\n",l.batch*l.inputs);
+    // printf("l.output_gpu:%d\n",l.batch*l.outputs);
+    // printf("net.input:%d\n",l.batch*net.l*net.w);
     cuda_pull_array(l.output_gpu, net.input, l.batch*l.inputs);
+    // printf("forward_yolo_layer_gpu check point 5\n");
     forward_yolo_layer(l, net);
+    // printf("forward_yolo_layer_gpu check point 6\n");
     cuda_push_array(l.delta_gpu, l.delta, l.batch*l.outputs);
+    // printf("forward_yolo_layer_gpu check point end\n");
 }
 
 void backward_yolo_layer_gpu(const layer l, network net)

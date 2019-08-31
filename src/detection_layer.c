@@ -21,6 +21,7 @@ detection_layer make_detection_layer(int batch, int inputs, int n, int side, int
     l.inputs = inputs;
     l.classes = classes;
     l.coords = coords;
+    
     l.rescore = rescore;
     l.side = side;
     l.w = side;
@@ -226,6 +227,7 @@ void get_detection_detections(layer l, int w, int h, float thresh, detection *de
 {
     int i,j,n;
     float *predictions = l.output;
+    printf("side%d\n",l.side);
     //int per_cell = 5*num+classes;
     for (i = 0; i < l.side*l.side; ++i){
         int row = i / l.side;
